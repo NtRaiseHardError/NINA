@@ -11,4 +11,4 @@ https://undev.ninja/nina-x64-process-injection/
 
 ## Something TODO
 
-* Fallback method to look for larger code caves within other modules if the executable image's address range.
+* Fallback method to look for larger code caves within other modules if the executable image's is too small.
