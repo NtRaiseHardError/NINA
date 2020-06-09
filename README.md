@@ -14,6 +14,10 @@ https://undev.ninja/nina-x64-process-injection/
 * Windows 10 x64 version 2004
 * Windows 10 x64 version 1903
 
+## Drawbacks
+
+The shellcode size limitation is whatever can fit into the targeted `RX` section. Perhaps use it as a stager?
+
 ## Something TODO
 
 * Fallback method to look for larger code caves within other modules if the executable image's is too small.
