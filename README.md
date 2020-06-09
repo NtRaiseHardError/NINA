@@ -16,7 +16,8 @@ https://undev.ninja/nina-x64-process-injection/
 
 ## Drawbacks
 
-The shellcode size limitation is whatever can fit into the targeted `RX` section. Perhaps use it as a stager?
+* The shellcode size limitation is whatever can fit into the targeted `RX` section. Perhaps use it as a stager?
+* The shellcode also has to fit within the target stack location. Perhaps enumerate all of the modules' `RW` sections too?
 
 ## Something TODO
 
